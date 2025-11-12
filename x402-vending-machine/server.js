@@ -1,47 +1,46 @@
-const express = require('express');
-const rateLimit = require('express-rate-limit');
-const helmet = require('helmet');
-const cors = require('cors');
-const winston = require('winston');
+/**
+ * x402 Vending Machine
+ *
+ * HTTP 402 Payment Required implementation for crypto micropayments
+ * Now using shared production utilities
+ */
+
 require('dotenv').config();
+const express = require('express');
+
+// Import shared utilities
+let middleware, storage;
+try {
+  const shared = require('../shared');
+  middleware = shared.middleware;
+  storage = shared.storage;
+} catch (error) {
+  console.warn('Shared utilities not available, using built-in alternatives');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Logging configuration
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  ]
-});
+// Initialize storage
+let storageManager;
+if (storage) {
+  storageManager = storage.createStorage();
+} else {
+  // Fallback in-memory storage
+  storageManager = {
+    pendingPayments: new Map(),
+    completedPayments: new Set(),
+    async initialize() { return this; },
+    async savePayment(id, data) { this.pendingPayments.set(id, data); },
+    async getPayment(id) { return this.pendingPayments.get(id); },
+    async deletePayment(id) { this.pendingPayments.delete(id); },
+    async listPayments() { return Array.from(this.pendingPayments.keys()); },
+    async exists(id) { return this.pendingPayments.has(id) || this.completedPayments.has(id); }
+  };
+}
 
-// Security middleware
-app.use(helmet());
-app.use(cors());
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
-
-app.use(express.json());
+// Get logger
+const logger = middleware ? middleware.logger : console;
 
 // x402 Configuration
 const X402_CONFIG = {
@@ -56,10 +55,6 @@ const X402_CONFIG = {
   }
 };
 
-// In-memory payment tracking (use Redis in production)
-const pendingPayments = new Map();
-const completedPayments = new Set();
-
 // Vending machine inventory
 const inventory = {
   'classic-cola': { name: 'Classic Cola', stock: 100, description: 'Refreshing classic taste' },
@@ -67,6 +62,25 @@ const inventory = {
   'grape-burst': { name: 'Grape Burst', stock: 50, description: 'Explosive grape goodness' },
   'premium-energy': { name: 'Premium Energy', stock: 25, description: 'High-caffeine energy boost' }
 };
+
+// Middleware setup
+app.use(express.json());
+
+if (middleware) {
+  // Use shared middleware
+  app.use(middleware.security.requestId);
+  app.use(middleware.security.configureHelmet());
+  app.use(middleware.security.configureCORS());
+  app.use(middleware.security.sanitizeInput);
+  app.use(middleware.agentDetection.agentMiddleware({ logActivity: true }));
+  app.use(middleware.rateLimiter.createRateLimiter());
+} else {
+  // Basic fallback middleware
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    next();
+  });
+}
 
 // Utility functions
 function generatePaymentId() {
@@ -88,15 +102,26 @@ function generateX402Headers(productId, token = 'USDC') {
   };
 }
 
+function generateActivationCode() {
+  return Math.random().toString(36).substr(2, 12).toUpperCase();
+}
+
+function simulateTransactionVerification(txHash, paymentDetails) {
+  // In a real implementation, this would query the blockchain
+  // For demo purposes, accept any transaction hash that looks valid
+  return txHash && txHash.length >= 32 && txHash.startsWith('0x');
+}
+
 // Routes
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
+  res.json({
+    status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
-    protocol: 'x402'
+    protocol: 'x402',
+    storage: storage ? 'shared-storage' : 'in-memory'
   });
 });
 
@@ -111,10 +136,12 @@ app.get('/inventory', (req, res) => {
     currency: 'USDC'
   }));
 
-  logger.info('Inventory requested', { 
-    ip: req.ip, 
+  logger.info('Inventory requested', {
+    ip: req.ip,
     userAgent: req.get('User-Agent'),
-    itemsAvailable: publicInventory.length
+    itemsAvailable: publicInventory.length,
+    agentId: req.agentId,
+    agentType: req.agentType
   });
 
   res.json({
@@ -125,7 +152,7 @@ app.get('/inventory', (req, res) => {
 });
 
 // Purchase endpoint - Returns 402 Payment Required
-app.get('/buy/:productId', (req, res) => {
+app.get('/buy/:productId', async (req, res) => {
   const { productId } = req.params;
   const preferredToken = req.query.token || 'USDC';
 
@@ -141,7 +168,7 @@ app.get('/buy/:productId', (req, res) => {
 
     // Validate token is accepted
     if (!X402_CONFIG.acceptedTokens.includes(preferredToken)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Token not accepted',
         accepted_tokens: X402_CONFIG.acceptedTokens
       });
@@ -149,27 +176,33 @@ app.get('/buy/:productId', (req, res) => {
 
     // Generate payment ID and store payment intent
     const paymentId = generatePaymentId();
-    pendingPayments.set(paymentId, {
+    const paymentData = {
       productId,
       token: preferredToken,
       amount: X402_CONFIG.prices[productId],
       timestamp: Date.now(),
-      ip: req.ip
-    });
+      ip: req.ip,
+      agentId: req.agentId,
+      agentType: req.agentType,
+      status: 'pending'
+    };
+
+    await storageManager.savePayment(paymentId, paymentData);
 
     // Generate x402 headers
     const x402Headers = generateX402Headers(productId, preferredToken);
-    
+
     // Add payment tracking
     x402Headers['x402-payment-id'] = paymentId;
     x402Headers['x402-expiry'] = (Date.now() + 300000).toString(); // 5 minutes
 
-    logger.info('Payment required', { 
-      paymentId, 
-      productId, 
+    logger.info('Payment required', {
+      paymentId,
+      productId,
       amount: X402_CONFIG.prices[productId],
       token: preferredToken,
-      ip: req.ip 
+      ip: req.ip,
+      agentId: req.agentId
     });
 
     // Return 402 Payment Required with x402 headers
@@ -195,7 +228,7 @@ app.get('/buy/:productId', (req, res) => {
 });
 
 // Payment confirmation endpoint
-app.post('/confirm-payment', (req, res) => {
+app.post('/confirm-payment', async (req, res) => {
   const { payment_id, transaction_hash, signature } = req.body;
 
   try {
@@ -205,20 +238,27 @@ app.post('/confirm-payment', (req, res) => {
     }
 
     // Check if payment exists and is pending
-    const paymentDetails = pendingPayments.get(payment_id);
+    const paymentDetails = await storageManager.getPayment(payment_id);
     if (!paymentDetails) {
       return res.status(404).json({ error: 'Payment not found or expired' });
     }
 
     // Check if payment already completed
-    if (completedPayments.has(payment_id)) {
+    if (paymentDetails.status === 'completed') {
       return res.status(409).json({ error: 'Payment already processed' });
     }
 
-    // In a real implementation, verify the transaction on-chain
-    // For this demo, we'll simulate verification
+    // Check if payment expired
+    const isExpired = Date.now() - paymentDetails.timestamp > 300000; // 5 minutes
+    if (isExpired) {
+      paymentDetails.status = 'expired';
+      await storageManager.savePayment(payment_id, paymentDetails);
+      return res.status(408).json({ error: 'Payment expired' });
+    }
+
+    // Verify the transaction
     const isValidTransaction = simulateTransactionVerification(transaction_hash, paymentDetails);
-    
+
     if (!isValidTransaction) {
       logger.warn('Invalid transaction', { payment_id, transaction_hash, ip: req.ip });
       return res.status(400).json({ error: 'Transaction verification failed' });
@@ -229,8 +269,10 @@ app.post('/confirm-payment', (req, res) => {
     product.stock -= 1;
 
     // Mark payment as completed
-    completedPayments.add(payment_id);
-    pendingPayments.delete(payment_id);
+    paymentDetails.status = 'completed';
+    paymentDetails.transaction_hash = transaction_hash;
+    paymentDetails.completed_at = Date.now();
+    await storageManager.savePayment(payment_id, paymentDetails);
 
     // Generate digital product (simulated)
     const digitalProduct = {
@@ -243,11 +285,12 @@ app.post('/confirm-payment', (req, res) => {
       transaction_hash
     };
 
-    logger.info('Purchase completed', { 
-      payment_id, 
+    logger.info('Purchase completed', {
+      payment_id,
       productId: paymentDetails.productId,
       transaction_hash,
-      ip: req.ip 
+      ip: req.ip,
+      agentId: paymentDetails.agentId
     });
 
     res.json({
@@ -270,110 +313,156 @@ app.post('/confirm-payment', (req, res) => {
 });
 
 // Get payment status
-app.get('/payment/:paymentId/status', (req, res) => {
+app.get('/payment/:paymentId/status', async (req, res) => {
   const { paymentId } = req.params;
 
-  if (completedPayments.has(paymentId)) {
-    res.json({ status: 'completed' });
-  } else if (pendingPayments.has(paymentId)) {
-    const payment = pendingPayments.get(paymentId);
-    const isExpired = Date.now() - payment.timestamp > 300000; // 5 minutes
-    
-    if (isExpired) {
-      pendingPayments.delete(paymentId);
-      res.json({ status: 'expired' });
-    } else {
-      res.json({ 
-        status: 'pending',
-        expires_in: Math.max(0, 300000 - (Date.now() - payment.timestamp))
-      });
+  try {
+    const payment = await storageManager.getPayment(paymentId);
+
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment not found' });
     }
-  } else {
-    res.status(404).json({ error: 'Payment not found' });
+
+    if (payment.status === 'completed') {
+      res.json({
+        status: 'completed',
+        transaction_hash: payment.transaction_hash,
+        completed_at: payment.completed_at
+      });
+    } else if (payment.status === 'pending') {
+      const isExpired = Date.now() - payment.timestamp > 300000; // 5 minutes
+
+      if (isExpired) {
+        payment.status = 'expired';
+        await storageManager.savePayment(paymentId, payment);
+        res.json({ status: 'expired' });
+      } else {
+        res.json({
+          status: 'pending',
+          expires_in: Math.max(0, 300000 - (Date.now() - payment.timestamp))
+        });
+      }
+    } else {
+      res.json({ status: payment.status });
+    }
+  } catch (error) {
+    logger.error('Payment status error', { error: error.message, paymentId });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // Analytics endpoint
-app.get('/analytics', (req, res) => {
-  const stats = {
-    total_payments_pending: pendingPayments.size,
-    total_payments_completed: completedPayments.size,
-    inventory_status: Object.entries(inventory).map(([id, item]) => ({
-      product: id,
-      stock: item.stock,
-      sold: 100 - item.stock // Assuming starting stock was 100
-    })),
-    supported_networks: [X402_CONFIG.network],
-    accepted_tokens: X402_CONFIG.acceptedTokens
-  };
+app.get('/analytics', async (req, res) => {
+  try {
+    const paymentKeys = await storageManager.listPayments();
+    let pendingCount = 0;
+    let completedCount = 0;
 
-  res.json(stats);
+    for (const key of paymentKeys) {
+      const payment = await storageManager.getPayment(key.replace('payment:', ''));
+      if (payment) {
+        if (payment.status === 'completed') completedCount++;
+        else if (payment.status === 'pending') pendingCount++;
+      }
+    }
+
+    const stats = {
+      total_payments_pending: pendingCount,
+      total_payments_completed: completedCount,
+      inventory_status: Object.entries(inventory).map(([id, item]) => ({
+        product: id,
+        stock: item.stock,
+        sold: 100 - item.stock
+      })),
+      supported_networks: [X402_CONFIG.network],
+      accepted_tokens: X402_CONFIG.acceptedTokens,
+      storage_type: storage ? 'redis-backed' : 'in-memory'
+    };
+
+    res.json(stats);
+  } catch (error) {
+    logger.error('Analytics error', { error: error.message });
+    res.status(500).json({ error: 'Analytics unavailable' });
+  }
 });
 
-// Helper functions
-function simulateTransactionVerification(txHash, paymentDetails) {
-  // In a real implementation, this would:
-  // 1. Query the blockchain for the transaction
-  // 2. Verify the recipient address matches
-  // 3. Verify the amount is correct
-  // 4. Verify the token is correct
-  // 5. Ensure the transaction is confirmed
-  
-  // For demo purposes, we'll accept any transaction hash that looks valid
-  return txHash && txHash.length >= 32 && txHash.startsWith('0x');
-}
-
-function generateActivationCode() {
-  return Math.random().toString(36).substr(2, 12).toUpperCase();
-}
-
-// Error handling middleware
-app.use((error, req, res, next) => {
-  logger.error('Unhandled error', { 
-    error: error.message, 
-    stack: error.stack, 
-    ip: req.ip,
-    path: req.path 
+// Error handling
+if (middleware) {
+  app.use(middleware.errorHandler.notFoundHandler);
+  app.use(middleware.errorHandler.errorHandler);
+} else {
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' });
   });
-  
-  res.status(500).json({ error: 'Internal server error' });
-});
 
-// 404 handler
-app.use((req, res) => {
-  logger.warn('Route not found', { path: req.path, method: req.method, ip: req.ip });
-  res.status(404).json({ error: 'Route not found' });
-});
+  app.use((error, req, res, next) => {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  });
+}
 
 // Cleanup expired payments periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [paymentId, payment] of pendingPayments.entries()) {
-    if (now - payment.timestamp > 300000) { // 5 minutes
-      pendingPayments.delete(paymentId);
-      logger.info('Expired payment cleaned up', { paymentId });
+setInterval(async () => {
+  try {
+    const paymentKeys = await storageManager.listPayments();
+    const now = Date.now();
+
+    for (const key of paymentKeys) {
+      const paymentId = key.replace('payment:', '');
+      const payment = await storageManager.getPayment(paymentId);
+
+      if (payment && payment.status === 'pending' && (now - payment.timestamp > 300000)) {
+        payment.status = 'expired';
+        await storageManager.savePayment(paymentId, payment);
+        logger.info('Expired payment cleaned up', { paymentId });
+      }
     }
+  } catch (error) {
+    logger.error('Cleanup error', { error: error.message });
   }
 }, 60000); // Run every minute
 
 // Start server
-app.listen(PORT, () => {
-  logger.info(`🚀 x402 Vending Machine started on port ${PORT}`);
-  logger.info('📍 Endpoints available:');
-  logger.info(`   GET  /health - Health check`);
-  logger.info(`   GET  /inventory - View available products`);
-  logger.info(`   GET  /buy/:productId - Purchase product (returns 402)`);
-  logger.info(`   POST /confirm-payment - Confirm blockchain payment`);
-  logger.info(`   GET  /payment/:id/status - Check payment status`);
-  logger.info(`   GET  /analytics - View system analytics`);
-  logger.info('');
-  logger.info('🔗 Try it out:');
-  logger.info(`   curl http://localhost:${PORT}/inventory`);
-  logger.info(`   curl http://localhost:${PORT}/buy/classic-cola`);
-  logger.info('');
-  logger.info('💰 Supported tokens:', X402_CONFIG.acceptedTokens.join(', '));
-  logger.info('🌐 Network:', X402_CONFIG.network);
-  logger.info('📍 Recipient:', X402_CONFIG.recipientAddress);
+async function startServer() {
+  try {
+    // Initialize storage
+    await storageManager.initialize();
+    logger.info('✓ Storage initialized');
+
+    app.listen(PORT, () => {
+      logger.info(`\n🚀 x402 Vending Machine started on port ${PORT}`);
+      logger.info('📍 Endpoints available:');
+      logger.info(`   GET  /health - Health check`);
+      logger.info(`   GET  /inventory - View available products`);
+      logger.info(`   GET  /buy/:productId - Purchase product (returns 402)`);
+      logger.info(`   POST /confirm-payment - Confirm blockchain payment`);
+      logger.info(`   GET  /payment/:id/status - Check payment status`);
+      logger.info(`   GET  /analytics - View system analytics`);
+      logger.info('');
+      logger.info('🔗 Try it out:');
+      logger.info(`   curl http://localhost:${PORT}/inventory`);
+      logger.info(`   curl http://localhost:${PORT}/buy/classic-cola`);
+      logger.info('');
+      logger.info('💰 Supported tokens:', X402_CONFIG.acceptedTokens.join(', '));
+      logger.info('🌐 Network:', X402_CONFIG.network);
+      logger.info('📍 Recipient:', X402_CONFIG.recipientAddress);
+      logger.info(`📦 Storage: ${storage ? 'Shared storage (Redis/in-memory)' : 'Built-in in-memory'}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, shutting down gracefully...');
+  if (storageManager.close) {
+    await storageManager.close();
+  }
+  process.exit(0);
 });
+
+startServer();
 
 module.exports = app;
