@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  # Redis only for local development
+  # Run vending machines directly on your host machine
+  redis:
+    image: redis:7-alpine
+    container_name: agentic-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-dev-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Redis Commander - Web UI for Redis
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis-dev-data:
+    driver: local
+
+networks:
+  default:
+    name: agentic-dev-network

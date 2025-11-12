@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  # Redis for production-ready storage
+  redis:
+    image: redis:7-alpine
+    container_name: agentic-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # x402 Vending Machine
+  x402-vending:
+    build:
+      context: ./x402-vending-machine
+      dockerfile: Dockerfile
+    container_name: x402-vending
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - USE_REDIS=true
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./x402-vending-machine:/app
+      - /app/node_modules
+
+  # AP2 Vending Machine
+  ap2-vending:
+    build:
+      context: ./ap2-vending-machine
+      dockerfile: Dockerfile
+    container_name: ap2-vending
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - USE_REDIS=true
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./ap2-vending-machine:/app
+      - /app/node_modules
+
+  # ACP Vending Machine
+  acp-vending:
+    build:
+      context: ./acp-vending-machine
+      dockerfile: Dockerfile
+    container_name: acp-vending
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - USE_REDIS=true
+      - REDIS_URL=redis://redis:6379
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./acp-vending-machine:/app
+      - /app/node_modules
+
+  # Mastercard Vending Machine
+  mastercard-vending:
+    build:
+      context: ./mastercard-vending-machine
+      dockerfile: Dockerfile
+    container_name: mastercard-vending
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=production
+      - PORT=3003
+      - USE_REDIS=true
+      - REDIS_URL=redis://redis:6379
+      - MASTERCARD_API_KEY=${MASTERCARD_API_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./mastercard-vending-machine:/app
+      - /app/node_modules
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  default:
+    name: agentic-network

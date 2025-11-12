@@ -1,0 +1,52 @@
+# Dockerfile Template for Agentic Vending Machines
+#
+# Multi-stage build for production optimization
+# Copy this to your vending machine directory and customize as needed
+
+FROM node:18-alpine AS base
+
+# Install production dependencies only
+FROM base AS deps
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
+
+# Build stage (if needed for TypeScript, etc.)
+FROM base AS build
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+# RUN npm run build (uncomment if you have a build step)
+
+# Production stage
+FROM base AS production
+WORKDIR /app
+
+# Copy dependencies from deps stage
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    mkdir -p /app/logs && \
+    chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port (customize per vending machine)
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Start application
+CMD ["node", "server.js"]
