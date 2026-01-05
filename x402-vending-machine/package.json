@@ -14,13 +14,13 @@
     "x402",
     "payments",
     "crypto",
-    "micropayments", 
+    "micropayments",
     "agentic",
     "autonomous",
     "coinbase",
     "cloudflare"
   ],
-  "author": "xPay",
+  "author": "{xpay✦}",
   "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",

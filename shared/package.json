@@ -14,7 +14,7 @@
     "payment-protocols",
     "utilities"
   ],
-  "author": "xPay",
+  "author": "{xpay✦}",
   "license": "MIT",
   "dependencies": {
     "redis": "^4.6.13",

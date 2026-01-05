@@ -1,0 +1,32 @@
+{
+  "name": "agentic-economy-boilerplate",
+  "version": "1.0.0",
+  "description": "Production-ready boilerplate for AI agent commerce protocols",
+  "private": true,
+  "scripts": {
+    "lint": "eslint . --ignore-pattern node_modules --ignore-pattern dist",
+    "lint:fix": "eslint . --fix --ignore-pattern node_modules --ignore-pattern dist",
+    "format": "prettier --write .",
+    "test": "npm run test:x402 && npm run test:ap2 && npm run test:acp && npm run test:mastercard",
+    "test:x402": "cd x402-vending-machine && npm test",
+    "test:ap2": "cd ap2-vending-machine && npm test",
+    "test:acp": "cd acp-vending-machine && npm test",
+    "test:mastercard": "cd mastercard-vending-machine && npm test"
+  },
+  "devDependencies": {
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.0"
+  },
+  "keywords": [
+    "agentic-payments",
+    "ai-agents",
+    "x402",
+    "micropayments",
+    "agent-commerce"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xpay-sh/agentic-economy-boilerplate"
+  }
+}

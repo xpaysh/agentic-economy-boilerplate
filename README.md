@@ -1,13 +1,15 @@
 # Agentic Economy Boilerplate
 
-> 🚀 **The Rosetta Stone for Agentic Payments** - One vending machine, 7 protocol implementations + production utilities
+> **The Rosetta Stone for Agentic Payments** - One vending machine, multiple protocol implementations + production utilities
 
 Get from zero to working agentic payments in 5 minutes with our battle-tested boilerplate examples.
 
-[![Main Repository](https://img.shields.io/badge/📚_Main_Repo-awesome--agentic--economy-blue)](https://github.com/xpaysh/awesome-agentic-economy)
-![Protocols](https://img.shields.io/badge/Protocols-4_Working+3_Planned-brightgreen)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![CI](https://github.com/xpay-sh/agentic-economy-boilerplate/actions/workflows/ci.yml/badge.svg)](https://github.com/xpay-sh/agentic-economy-boilerplate/actions/workflows/ci.yml)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
+[![Main Repository](https://img.shields.io/badge/Main_Repo-awesome--agentic--economy-blue)](https://github.com/xpaysh/awesome-agentic-economy)
+![Protocols](https://img.shields.io/badge/Protocols-4_Working+4_Planned-brightgreen)
 ![Setup Time](https://img.shields.io/badge/Setup_Time-5_minutes-orange)
-![Production Ready](https://img.shields.io/badge/Production-Utilities_Included-success)
 
 ## 🎯 Quick Start
 
