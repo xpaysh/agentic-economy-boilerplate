@@ -166,9 +166,12 @@ agentic-economy-boilerplate/
 ├── x402-vending-machine/              # ✅ HTTP 402 crypto payments
 ├── ap2-vending-machine/               # ✅ Google AP2 enterprise
 ├── acp-vending-machine/               # ✅ OpenAI + Stripe consumer
-├── mastercard-vending-machine/        # ✅ Mastercard TradFi (NEW)
-├── pay3-vending-machine/              # 📋 Pay3 stablecoin (planned)
-├── hybrid-examples/                   # 📋 Multi-protocol agents (planned)
+├── mastercard-vending-machine/        # ✅ Mastercard TradFi
+├── visa-tap-vending-machine/          # 📋 Visa Trusted Agent Protocol (planned)
+├── ack-vending-machine/               # 📋 Agent Commerce Kit (planned)
+├── aep2-vending-machine/              # 📋 Agent Embedded Payment Protocol (planned)
+├── a2a-x402-vending-machine/          # 📋 Google A2A + x402 hybrid (planned)
+├── hybrid-examples/                   # 📋 Multi-protocol examples (deferred)
 ├── docker-compose.yml                 # 🐳 Production deployment
 ├── docker-compose.dev.yml             # 🐳 Development environment
 └── .env.example                       # 📝 Environment template
@@ -221,6 +224,12 @@ cd mastercard-vending-machine && cp .env.example .env
 - [**AP2 README**](./ap2-vending-machine/README.md) - Enterprise authorization
 - [**ACP README**](./acp-vending-machine/README.md) - Consumer checkout
 - [**Mastercard README**](./mastercard-vending-machine/README.md) - Card payments
+
+### Planned Protocols
+- [**Visa TAP**](./visa-tap-vending-machine/README.md) - Visa Trusted Agent Protocol
+- [**ACK**](./ack-vending-machine/README.md) - Agent Commerce Kit
+- [**AEP2**](./aep2-vending-machine/README.md) - Agent Embedded Payment Protocol
+- [**A2A + x402**](./a2a-x402-vending-machine/README.md) - Google A2A with x402 payments
 
 ## 🎯 Real-World Use Cases
 
