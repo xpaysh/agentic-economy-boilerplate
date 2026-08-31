@@ -87,6 +87,8 @@ curl http://localhost:3000/buy/classic-cola
 
 [Full Documentation](./x402-vending-machine/README.md)
 
+**Live production deployment:** [NEX Agent Co.](https://nexaitechau.github.io/) — first A2A + x402 dual-protocol agent on Base mainnet. 11 paid USDC endpoints at $0.001-0.01, 10 free mirrors, 23 on-chain NFTs. Apache-2.0 reference: [NEXAITECHAU/nex-x402-server](https://github.com/NEXAITECHAU/nex-x402-server).
+
 ### ✅ AP2 Vending Machine
 **Protocol**: Google Agent Payments Protocol (AP2)
 **Best For**: Enterprise workflows, auditable payments
